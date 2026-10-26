@@ -117,7 +117,6 @@ speedMult: 3.0,       // starting speed (1.0 = normal)
 noBusDeath: true,     // buses can't kill you
 invincible: true,     // the mob can't catch you
 keepMoney: true,      // police bribes are free
-pointsMult: 1,       // ৳ multiplier (1 = normal)
 busPoints: true,      // ramming buses/trucks pays ৳
 savedSound: true,     // sound when you survive a hit
 endSound: true,       // sound when you end a run
