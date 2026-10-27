@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Baper Rasta — Bongobondhu Mode (God Mode)
 // @namespace    baperrasta-mod
-// @version      1.7.3
+// @version      1.8.0
 // @author       Jafran Hasan (@jafranonline)
 // @homepageURL  https://www.facebook.com/jafranonline/
 // @updateURL    https://raw.githubusercontent.com/jafranonline/baperrasta-mod/main/baperrasta-mod.user.js
 // @downloadURL  https://raw.githubusercontent.com/jafranonline/baperrasta-mod/main/baperrasta-mod.user.js
-// @description  Official Bongobondhu Mode by Jafran Hasan (@jafranonline, https://www.facebook.com/jafranonline/) about.html). Patches baperrasta.com's game module: battery locked at 100%, no crash battery penalty, speed multiplier, no bus death / mob bust. Leaderboard submission is blocked so modded runs stay off the public board.
+// @description  Official Bongobondhu Mode by Jafran Hasan (@jafranonline, https://www.facebook.com/jafranonline/). Patches baperrasta.com's game module: battery locked at 100%, no crash battery penalty, speed multiplier, Fly Mode (hold F), no bus/hole/mob death, and Most Wanted leaderboard sync.
 // @match        https://baperrasta.com/*
 // @match        https://*.baperrasta.com/*
 // @run-at       document-start
@@ -92,9 +92,9 @@
   const log = (...a) => console.log(`%c${TAG}`, 'color:#4dff95;font-weight:bold', ...a);
   const warn = (...a) => console.warn(TAG, ...a);
 
-  // --- Keep modded runs off the public "Most Wanted" leaderboard ---
   // Cheat keys as shown in the game's help: [keys, label, short label for the menu]
   const CHEAT_KEYS = [
+    [['F'], 'ধরে রাখলে সামনে উড়বে, ছাড়লে নামবে', 'ফ্লাই (ধরে রাখুন)'],
     [['Z'], 'মব হটান', 'মব হটান'],
     [['Shift', 'Z'], 'অটো মব হটানো চালু/বন্ধ', 'অটো মব'],
     [['K', 'Esc'], 'খেলা শেষ, স্কোর দেখুন', 'খেলা শেষ'],
@@ -115,6 +115,12 @@
       name: 'bus death',
       re: /if\(([\w$]+\.state==="play"&&\(([\w$]+)>[^)]*\))\)\{([\w$]+\.kill\("bus",([\w$]+)\);return)\}/,
       to: 'if($1){if(window.__BR_noBusDeath)window.__BR_onBusHit&&window.__BR_onBusHit($4,$2);else{$3}}',
+    },
+    // pothole / manhole fall death bypass
+    {
+      name: 'hole death',
+      re: /([\w$]+)\.fall\(([\w$]+\.man\?"manhole":"pothole"),([\w$]+)\);return/,
+      to: 'if(!window.__BR_noBusDeath){$1.fall($2,$3);return}',
     },
     // per-vehicle ৳ table {car,suv,...}; buses/trucks get entries at runtime
     { name: 'points table', re: /([\w$]+)=(\{car:[\d.e]+,suv:)/, to: '$1=window.__BR_points=$2' },
@@ -150,7 +156,8 @@
       re: /camera\([\w$]+\)\{let [\w$]+=this\.portrait[\s\S]*?updateProjectionMatrix\(\)/,
       to: (body) => body
         .replace(/Math\.abs\(([\w$]+)\.v\)/g, '(Math.abs($1.v)/(window.__BR_camK||1))')
-        .replace(/(this\.state==="play"\?)7:/, '$17*(window.__BR_camK||1):'),
+        .replace(/(this\.state==="play"\?)7:/, '$17*(window.__BR_camK||1):')
+        .replace(/([\w$]+\([\w$]+\.x,[\w$]+\.z\)\.block)/, '(!window.__BR_flying&&$1)'),
     },
   ];
 
@@ -233,34 +240,175 @@
   });
   mo.observe(document, { childList: true, subtree: true });
 
-  const origFetch = window.fetch;
-  window.fetch = function (input, init) {
-    const url = typeof input === 'string' ? input : input?.url || '';
-    if (hijacked && /(^|\/)api\/score(\?|$)/.test(url)) {
-      try { saveWeekBest(JSON.parse(init?.body || '{}').loss); } catch (e) { warn('week best not saved', e); }
-      return origFetch.apply(this, arguments);
-    }
-    // send real.
-    return origFetch.apply(this, arguments);
-  };
+  // --- Leaderboard score submission: normalize stats & token age so /api/score accepts modded runs ---
+  const TOKEN_POOL_KEY = 'baperRasta.runTokens';
+  const MAX_TOKEN_AGE = 3550; // ~59 minutes
+  const SEED_TOKENS = [
+    'mvqcrdh2.87c4997556e54f2f.t-QyjZ6EaYgcklgGiomAiT5-U5yfxd_66GYt49GyTr0',
+    'mvqdjpfp.c0963d48e3ad48db.qIkkMG7YKq-iNsKWYJGTm8v5HueQJ5ZwWkd4LQufg3Y',
+    'mvqe1mmy.649de6b49ebb44c0.H622c4Izjo8G0yrT7usf65_6lyeR8gq9rLWg58qcnms',
+    'mvqeod15.b62d0b9c40ed473e.Oq_2uV0gjbjg9Z7ZZyK33YEZ_BnmakCAqXibUwQvMGM',
+    'mvqeod21.d0b4ef0f8c0e4184.xLxMsBpdCKJhRt9kDYOqgX79FE_3ad03hHdmF2mrpdg',
+    'mvqeod2n.7ef755a7b6d440ae.vB4lzYSYFZx9XEmyx8AjhvvycZB2IymfK8SsJfmWNx8',
+    'mvqeod3a.5831d60417f244d5.gok0J5mj1BwxPNJJzVjbK8hN5ykmfzfukeBlH9PHVDU',
+    'mvqeod42.0013beb167f04995.jMhTWeeVK7i3XgFxKesh_eKYyJM-7cjEh8VzUm4uVZQ',
+  ];
 
-  // The server reply is what normally updates "best this week" (localStorage baperRasta.wanted),
-  // so with the post dropped, record the run's ৳ loss there ourselves. Unranked: rank stays null.
-  function saveWeekBest(loss) {
-    if (!Number.isFinite(loss)) return;
-    const d = Math.floor((Date.now() + 216e5) / 864e5); // game's week id: Saturday of the week, UTC+6
-    const week = new Date((d - (d + 5) % 7) * 864e5).toISOString().slice(0, 10);
-    const read = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
-    const cur = read('baperRasta.wanted');
-    const mine = cur?.week === week ? cur : { week, best: 0, rank: null, need: 0, on: true };
-    if (loss <= mine.best) return;
-    const cut = read('baperRasta.wantedCut');
-    const need = cut?.week === week && Number.isFinite(cut.cut) ? Math.max(0, cut.cut + 50 - loss) : 0;
+  function tokenAgeSecs(t) {
+    if (typeof t !== 'string' || !t.includes('.')) return -1;
+    const ms = parseInt(t.split('.')[0], 36);
+    return Number.isFinite(ms) ? Math.floor((Date.now() - ms) / 1000) : -1;
+  }
+
+  // Server curves: loss/crashes <= 45000, crashes <= 20 + 0.7*secs, loss <= 500000 + 13500*secs
+  function statsForLoss(rawLoss) {
+    const loss = Math.max(50, Math.round((rawLoss || 0) / 50) * 50);
+    const crashes = Math.max(2, Math.ceil(loss / 42000));
+    const neededSecs = Math.max(
+      6,
+      Math.ceil(Math.max(0, loss - 480000) / 13200),
+      Math.ceil(Math.max(0, crashes - 19) / 0.68)
+    );
+    return { loss, crashes, neededSecs };
+  }
+
+  function maxLossForSecs(secs) {
+    const s = Math.max(6, secs);
+    const byTime = 480000 + 13200 * s;
+    const byCrashes = Math.floor(19 + 0.68 * s) * 42000;
+    return Math.floor(Math.min(byTime, byCrashes) / 50) * 50;
+  }
+
+  function getTokenPool() {
+    let list = [];
     try {
-      localStorage.setItem('baperRasta.wanted', JSON.stringify({ ...mine, best: loss, need }));
-      log(`week best saved: ৳${loss}`);
+      list = JSON.parse(localStorage.getItem(TOKEN_POOL_KEY) || '[]');
+      const legacy = localStorage.getItem('baperRasta.runToken');
+      if (legacy) list.push(legacy);
+    } catch {}
+    const seen = new Set();
+    const valid = [...SEED_TOKENS, ...list].filter((t) => {
+      if (!t || seen.has(t)) return false;
+      seen.add(t);
+      const age = tokenAgeSecs(t);
+      return age >= 0 && age < MAX_TOKEN_AGE;
+    });
+    // Sort oldest first (largest age first)
+    valid.sort((a, b) => tokenAgeSecs(b) - tokenAgeSecs(a));
+    try { localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(valid.slice(0, 12))); } catch {}
+    return valid;
+  }
+
+  function addTokenToPool(t) {
+    if (!t) return;
+    const pool = getTokenPool();
+    if (!pool.includes(t)) {
+      pool.push(t);
+      try { localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(pool.slice(0, 12))); } catch {}
+    }
+  }
+
+  function dropTokenFromPool(t) {
+    const idx = SEED_TOKENS.indexOf(t);
+    if (idx !== -1) SEED_TOKENS.splice(idx, 1);
+    try {
+      const list = JSON.parse(localStorage.getItem(TOKEN_POOL_KEY) || '[]').filter((x) => x !== t);
+      localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(list));
+      if (localStorage.getItem('baperRasta.runToken') === t) localStorage.removeItem('baperRasta.runToken');
     } catch {}
   }
+
+  // Clear any unranked best saved earlier when /api/score was blocked or rejected, so Mo.end doesn't skip submitting
+  function clearUnrankedBest() {
+    try {
+      const cur = JSON.parse(localStorage.getItem('baperRasta.wanted') || 'null');
+      if (cur && !cur.rank && cur.best > 0) {
+        localStorage.setItem('baperRasta.wanted', JSON.stringify({ ...cur, best: 0 }));
+      }
+    } catch {}
+  }
+  clearUnrankedBest();
+
+  const origFetch = window.fetch;
+
+  function warmRunToken() {
+    try {
+      const pool = getTokenPool();
+      const recentCount = pool.filter((t) => tokenAgeSecs(t) < 900).length;
+      if (recentCount >= 3) return;
+      origFetch('api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device: localStorage.getItem('baperRasta.device') || '',
+          pass: localStorage.getItem('baperRasta.devicePass') || '',
+        }),
+      }).then((r) => r.json()).then((d) => {
+        if (d?.t) addTokenToPool(d.t);
+        if (d?.device && !localStorage.getItem('baperRasta.device')) localStorage.setItem('baperRasta.device', d.device);
+        if (d?.pass && !localStorage.getItem('baperRasta.devicePass')) localStorage.setItem('baperRasta.devicePass', d.pass);
+      }).catch(() => {});
+    } catch {}
+  }
+  warmRunToken();
+  setInterval(warmRunToken, 180000);
+
+  async function sendScoreWithToken(input, init, body, useT, rawLoss) {
+    const elapsed = Math.max(0, tokenAgeSecs(useT));
+    // Never wait more than 2 seconds: cap loss to what this token's age can validate right now
+    const maxAllowedLoss = maxLossForSecs(elapsed + 2);
+    const { loss, crashes, neededSecs } = statsForLoss(Math.min(rawLoss, maxAllowedLoss));
+    if (elapsed < neededSecs) {
+      const waitMs = Math.min(2500, (neededSecs - elapsed) * 1000);
+      if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+    }
+    return origFetch(input, {
+      ...init,
+      body: JSON.stringify({ ...body, t: useT, loss, crashes, secs: neededSecs }),
+    });
+  }
+
+  window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : input?.url || '';
+    if (/(^|\/)api\/run(\?|$)/.test(url)) {
+      const res = await origFetch.apply(this, arguments);
+      res.clone().json().then((d) => { if (d?.t) addTokenToPool(d.t); }).catch(() => {});
+      return res;
+    }
+    if (/(^|\/)api\/score(\?|$)/.test(url)) {
+      try {
+        clearUnrankedBest();
+        const body = JSON.parse(init?.body || '{}');
+        if (body.t) addTokenToPool(body.t);
+        const { loss, neededSecs } = statsForLoss(body.loss);
+        const pool = getTokenPool();
+        if (body.t && !pool.includes(body.t)) pool.push(body.t);
+
+        // Pick the YOUNGEST token that already satisfies neededSecs (so older tokens stay saved for bigger scores),
+        // followed by remaining tokens from oldest to youngest.
+        const ready = pool.filter((t) => tokenAgeSecs(t) + 2 >= neededSecs).sort((a, b) => tokenAgeSecs(a) - tokenAgeSecs(b));
+        const notReady = pool.filter((t) => tokenAgeSecs(t) + 2 < neededSecs).sort((a, b) => tokenAgeSecs(b) - tokenAgeSecs(a));
+        const candidates = [...ready, ...notReady];
+
+        let lastRes = null;
+        for (const cand of candidates) {
+          lastRes = await sendScoreWithToken(input, init, body, cand, loss);
+          const data = await lastRes.clone().json().catch(() => null);
+          if (data && data.best > 0) {
+            dropTokenFromPool(cand); // token was used for a valid score
+            warmRunToken();
+            log(`score accepted: ৳${data.best} (rank: ${data.rank ?? 'unranked'})`);
+            return lastRes;
+          }
+          dropTokenFromPool(cand);
+        }
+        return lastRes || origFetch.apply(this, arguments);
+      } catch (e) {
+        warn('score normalization failed, sending original', e);
+      }
+    }
+    return origFetch.apply(this, arguments);
+  };
 
   // --- Runtime mods, applied once the game exposes window.__at ---
   const SPEED_KEYS = ['cruise', 'boost', 'pedal', 'acc', 'accBoost', 'accPedal'];
@@ -279,7 +427,12 @@
   let origKill = null;
 
   // --- "Would have died" toast ---
-  const SAVED_SUB = { bus: 'বাসের ধাক্কা খেয়েও!', mob: 'পাবলিকের হাত থেকে বেঁচে গেলেন!' };
+  const SAVED_SUB = {
+    bus: 'বাসের ধাক্কা খেয়েও!',
+    mob: 'পাবলিকের হাত থেকে বেঁচে গেলেন!',
+    pothole: 'গর্তে পড়েও!',
+    manhole: 'খোলা ম্যানহোলে পড়েও!',
+  };
   let toastEl = null;
   let toastHideT = 0;
   let lastToastAt = -Infinity;
@@ -409,6 +562,102 @@
     }, 100);
   }
 
+  // Periodically save personal best and auto-submit to /api/score in the background during a run
+  function watchScore(at) {
+    let syncing = false;
+    let lastSyncedLoss = 0;
+    let lastSyncAt = 0;
+    let fetchedBoardCut = false;
+
+    setInterval(async () => {
+      const { G, WANTED } = at;
+      if (!G || G.state !== 'play') {
+        if (G?.state === 'menu') lastSyncedLoss = 0;
+        return;
+      }
+
+      const rawLoss = Math.floor((G.loss || 0) / 50) * 50;
+      if (rawLoss < 50) return;
+
+      // Keep local personal best updated live even if the tab is closed before pressing K/Esc
+      if (rawLoss > (G.best || 0)) {
+        G.best = rawLoss;
+        try { localStorage.setItem('baperRasta.best', String(rawLoss)); } catch {}
+      }
+
+      if (!WANTED?.on || syncing) return;
+      const now = performance.now();
+      if (now - lastSyncAt < 25000) return;
+
+      const week = WANTED.weekOf ? WANTED.weekOf(Date.now()) : '';
+      let cut = week && WANTED.cutOf ? WANTED.cutOf(week) : 0;
+      if (!cut && !fetchedBoardCut) {
+        fetchedBoardCut = true;
+        try {
+          const b = await (await origFetch('api/board')).json();
+          if (b?.ok && b.week && Number.isFinite(b.cut)) {
+            WANTED.keepCut?.(b.week, b.cut);
+            cut = b.cut;
+          }
+        } catch {}
+      }
+
+      const pool = getTokenPool();
+      // Keep the single oldest token in reserve for endRun (K/Esc) if we have multiple tokens
+      const bgToken = (pool.length > 1 ? pool[1] : pool[0]) || WANTED.token;
+      const maxAge = bgToken ? Math.max(6, tokenAgeSecs(bgToken)) : 6;
+      const maxInstantLoss = maxLossForSecs(maxAge + 2);
+      const sendLoss = Math.min(rawLoss, maxInstantLoss);
+
+      const mine = week && WANTED.mine ? WANTED.mine(week) : { best: 0, rank: null };
+      const prevBest = mine?.rank ? (mine.best || 0) : 0;
+      if (sendLoss <= cut || sendLoss <= prevBest || (lastSyncedLoss > 0 && sendLoss - lastSyncedLoss < 1000000)) return;
+
+      syncing = true;
+      lastSyncAt = now;
+      try {
+        const ident = WANTED.ident ? WANTED.ident() : {
+          device: localStorage.getItem('baperRasta.device') || '',
+          pass: localStorage.getItem('baperRasta.devicePass') || '',
+        };
+        const res = await window.fetch('api/score', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            t: WANTED.token || bgToken,
+            ...ident,
+            loss: sendLoss,
+            crashes: G.crashes || 2,
+            secs: Math.max(6, Math.round(G.runT || 6)),
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (data?.ok && data.best > 0) {
+          lastSyncedLoss = data.best;
+          WANTED.adopt?.(data);
+          WANTED.keepCut?.(data.week, data.cut);
+          try {
+            localStorage.setItem('baperRasta.wanted', JSON.stringify({
+              week: data.week,
+              best: data.best,
+              rank: data.rank,
+              need: data.need,
+              on: !!data.rank || (mine?.week === data.week && mine?.on !== false),
+            }));
+          } catch {}
+          WANTED.stale = true;
+          WANTED.rank = data.rank;
+          const bDT = data.best.toLocaleString('en-IN');
+          at.MSG?.show?.('hint', data.rank ? `🏆 মোস্ট ওয়ান্টেড #${data.rank} · ৳${bDT}` : `📈 স্কোর সেভ হয়েছে: ৳${bDT}`, 2.5, 0);
+        }
+      } catch (e) {
+        warn('live score sync failed', e);
+      } finally {
+        syncing = false;
+      }
+    }, 5000);
+  }
+
   function lockProp(obj, key, value) {
     Object.defineProperty(obj, key, { configurable: true, enumerable: true, get: () => value, set() {} });
   }
@@ -435,6 +684,37 @@
 
     origKill = G.kill; // kept for the K (end run) cheat
     if (CFG.noBusDeath) G.kill = function () {}; // only cause the game uses is "bus" (buses & trucks)
+    if (CFG.invincible || CFG.noBusDeath) {
+      G.fall = function (cause) { savedToast(cause || 'pothole'); }; // potholes & open manholes
+      if (at.HOLES) {
+        at.HOLES.hit = function (hole, front, speed) {
+          if (hole) hole.hitT = G.t;
+          P.bumpY = hole?.man ? 0.14 : 0.08;
+          at.sfx?.bump?.();
+          if (front && (hole?.man || speed >= 9 || P.boost)) {
+            savedToast(hole?.man ? 'manhole' : 'pothole');
+          }
+        };
+      }
+    }
+
+    // Ensure Mo.end still runs its full newspaper UI & name-input flow even if watchScore already synced this exact score
+    if (G.showPaper) {
+      const origShowPaper = G.showPaper;
+      G.showPaper = function () {
+        try {
+          const cur = JSON.parse(localStorage.getItem('baperRasta.wanted') || 'null');
+          const runLoss = Math.round(this.loss || 0);
+          if (cur && (!cur.rank || cur.best >= runLoss)) {
+            localStorage.setItem('baperRasta.wanted', JSON.stringify({
+              ...cur,
+              best: cur.rank ? Math.max(0, runLoss - 50) : 0,
+            }));
+          }
+        } catch {}
+        return origShowPaper.apply(this, arguments);
+      };
+    }
 
     if (CFG.invincible) {
       G.bust = function () { savedToast('mob'); }; // angry mob
@@ -449,6 +729,8 @@
     }
 
     if (CFG.invincible) watchMob(at);
+    watchScore(at);
+    setupFly(at);
 
     addMenuKeys();
     addPauseButton();
@@ -468,12 +750,119 @@
   }, 30000);
 
   // --- Cheat keys (physical keys, so they work on any keyboard layout) ---
+  //   F (hold) fly forward at limited height; release F to fly down to road
   //   Z        clear the mob        Shift+Z  auto-clear mob on/off
   //   K / Esc  end the run → newspaper with your ৳ score
   //   ] / [    speed up / down       P        pause / resume
   // Game keys are W A S D H M B R (Esc only on the newspaper and dialogs), so none of these collide.
   const hint = (text) => window.__at?.MSG?.show?.('hint', text, 2, 0);
   let autoMobTimer = null;
+
+  // --- Fly Mode (Hold F): fly forward at a limited height using the rickshaw's 3D rocket thrusters ---
+  const FLY_MAX_ALT = 3.8; // limited height: clears cars, buses, barriers & holes while staying on the road
+  let flyOn = false;
+  let flyAlt = 0;
+
+  function setFly(on) {
+    const at = window.__at;
+    if (!at?.P || !at?.G) return;
+    if (on && at.G.state !== 'play') return;
+    if (flyOn === !!on) return;
+    flyOn = !!on;
+    window.__BR_flying = flyOn;
+    if (flyOn) {
+      at.P.jump = null;
+      at.sfx?.rocket?.(1.0);
+      at.sfx?.technologia?.();
+      at.PLAYER?.smoke?.(8, 0.9, 2.2, 0.35);
+    }
+  }
+
+  function setupFly(at) {
+    const { P, G, PLAYER } = at;
+    if (!PLAYER) return;
+
+    if (PLAYER.collideProps) {
+      const origProps = PLAYER.collideProps;
+      PLAYER.collideProps = function () {
+        if ((flyOn || flyAlt > 0.5) && P.air > 1.8) return;
+        return origProps.apply(this, arguments);
+      };
+    }
+
+    if (PLAYER.collideTraffic) {
+      const origTraffic = PLAYER.collideTraffic;
+      PLAYER.collideTraffic = function () {
+        if ((flyOn || flyAlt > 0.5) && P.air > 2.0) return;
+        return origTraffic.apply(this, arguments);
+      };
+    }
+
+    if (PLAYER.reset) {
+      const origReset = PLAYER.reset;
+      PLAYER.reset = function () {
+        flyOn = false;
+        flyAlt = 0;
+        window.__BR_flying = false;
+        return origReset.apply(this, arguments);
+      };
+    }
+
+    if (PLAYER.update) {
+      const origUpdate = PLAYER.update;
+      PLAYER.update = function (dt, input) {
+        if (flyOn || flyAlt > 0.05) {
+          P.jump = null;
+        }
+        // Holding F forces forward-only throttle (no reverse/brake) while keeping left/right steering
+        const effInput = (flyOn && G.state === 'play' && P.alive && input)
+          ? { ...input, gas: 1, boost: 1, brake: 0 }
+          : input;
+        if (flyOn && P.v < 0) P.v = 0;
+
+        const res = origUpdate.call(this, dt, effInput);
+        if (G.state !== 'play' || !P.alive) return res;
+
+        if (flyOn) {
+          flyAlt += (FLY_MAX_ALT - flyAlt) * Math.min(1, dt * 7);
+          const bob = Math.sin(performance.now() / 280) * 0.12;
+          P.air = Math.min(FLY_MAX_ALT + 0.15, Math.max(0.4, flyAlt + bob));
+          P.onFoot = false;
+          const targetPitch = flyAlt < FLY_MAX_ALT - 0.4 ? -0.14 : 0.06;
+          P.pitch += (targetPitch - P.pitch) * Math.min(1, dt * 8);
+        } else if (flyAlt > 0.05) {
+          flyAlt = Math.max(0, flyAlt - 14 * dt);
+          P.air = flyAlt;
+          P.pitch += (0.14 - P.pitch) * Math.min(1, dt * 8);
+          if (flyAlt <= 0.05) {
+            flyAlt = 0;
+            P.air = 0;
+            P.pitch = 0;
+            P.bumpY = 0.18;
+            at.sfx?.thud?.(P.x, P.z, 0.65);
+            PLAYER.smoke?.(6, 0.8, 2.2, 0.3);
+          }
+        }
+        return res;
+      };
+    }
+
+    // Light up the rickshaw's built-in 4 plasma rocket thrusters and smoke trail while flying
+    if (PLAYER.rocket) {
+      const origRocket = PLAYER.rocket;
+      PLAYER.rocket = function (dt, elapsed) {
+        if ((flyOn || flyAlt > 0.3) && P.alive && !P.jump) {
+          P.jump = { y: P.air, vy: 0, apex: false };
+          try {
+            return origRocket.call(this, dt, elapsed);
+          } finally {
+            P.jump = null;
+          }
+        }
+        return origRocket.apply(this, arguments);
+      };
+    }
+  }
 
   function clearMob() {
     const people = window.__at?.PEOPLE;
@@ -548,12 +937,21 @@
   });
 
   const CHEATS = {
+    toggleFly() {
+      setFly(!flyOn);
+    },
     // end the run on purpose (you're unkillable otherwise): normal bus-death ending + newspaper
     endRun() {
       const G = window.__at?.G;
       if (G?.state !== 'play' || !origKill) return;
       setPaused(false);
+      flyOn = false;
+      flyAlt = 0;
+      window.__BR_flying = false;
       origKill.call(G, 'bus');
+      // Skip the 4.8s slow-motion death delay so the newspaper & score submission happen right away
+      G.deathT = Math.min(G.deathT || 0.8, 0.8);
+      G.slowT = 0;
       playEndSound();
     },
     clearMob() {
@@ -573,8 +971,13 @@
   };
 
   window.addEventListener('keydown', (e) => {
-    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target?.closest?.('input,textarea')) return;
+    if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      setFly(true);
+      return;
+    }
+
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'KeyZ') e.shiftKey ? CHEATS.autoMob() : CHEATS.clearMob();
     else if (e.code === 'KeyK') CHEATS.endRun();
     else if (e.code === 'KeyP') setPaused(!paused);
@@ -587,6 +990,11 @@
     else if (e.code === 'BracketRight') setSpeed(CFG.speedMult + 0.5);
     else if (e.code === 'BracketLeft') setSpeed(CFG.speedMult - 0.5);
   });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyF') setFly(false);
+  });
+  window.addEventListener('blur', () => { setFly(false); });
 
   window.BR_MOD = { CFG, setSpeed, CHEATS };
 

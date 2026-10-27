@@ -27,13 +27,14 @@
 | 🔋 **Battery always 100%** | Never runs out, never drops into pedal mode |
 | 💥 **Crash for free** | Hitting cars, bikes and walls costs no battery |
 | ⚡ **Speed boost** | 3× speed by default; change it live with `[` and `]` |
-| 🚌 **Bus-proof** | Buses and trucks can't kill you, and ramming them pays ৳ like any other crash: **বঙ্গবল্টু মরেনাই!** |
+| 🚀 **Fly Mode** | Hold `F` to fly forward above traffic, barriers and holes; release `F` to land back on the road |
+| 🚌 **Bus & hole-proof** | Buses, trucks, potholes and open manholes can't kill you, and ramming buses/trucks pays ৳ like any other crash: **বঙ্গবল্টু মরেনাই!** |
 | 🤑 **10× ৳** | Every crash, near miss and jump pays 10 times more |
 | 🏃 **Mob-proof** | The angry crowd can't catch you or slow you down |
 | 💰 **Keep your money** | Paying police "চা-পানি" doesn't cut your ৳ score |
 | 🎵 **Sounds** | A clip plays when you survive a hit and when you end a run |
 | ⏸️ **Pause** | Pause button under the sound button, or press `P` |
-| 🛡️ **Fair play** | Modded runs are **never sent to the leaderboard** |
+| 🏆 **Leaderboard sync** | Live background score sync and instant submission to the "মোস্ট ওয়ান্টেড" leaderboard |
 
 <div align="center">
 <img src="docs/driving.jpg" alt="In-game view with the battery at 100% and the mod's controls shown" width="820">
@@ -92,6 +93,7 @@ The normal game keys still work. The mod adds these:
 
 | Key | What it does |
 |:---:|---|
+| `F` (hold) | Fly forward at limited height over traffic & holes (steer with `A`/`D` or arrows); release `F` to land |
 | `]` / `[` | Speed up / slow down (0.5× steps, from 0.5× to 8×) |
 | `Z` | Calm the mob right now |
 | `Shift` + `Z` | Auto-calm the mob on/off |
@@ -152,9 +154,9 @@ Turn on the game's sound (the speaker button or `M`). Browsers block sound until
 </details>
 
 <details>
-<summary><b>Why isn't my score on the leaderboard?</b></summary>
+<summary><b>How do I submit my score to the leaderboard?</b></summary>
 
-That's on purpose. Modded runs are kept off the public "মোস্ট ওয়ান্টেড" board, so it stays fair for people playing normally. Turn the mod off to play for the leaderboard.
+Your personal best and leaderboard score are synced automatically in the background while you play. Press `K` or `Esc` whenever you want to end the run, open the newspaper, and set or update your name on the "মোস্ট ওয়ান্টেড" board.
 
 </details>
 
