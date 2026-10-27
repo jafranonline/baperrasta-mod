@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Baper Rasta — Bongobondhu Mode (God Mode)
 // @namespace    baperrasta-mod
-// @version      1.8.1
+// @version      1.8.2
 // @author       Jafran Hasan (@jafranonline)
 // @homepageURL  https://www.facebook.com/jafranonline/
 // @updateURL    https://raw.githubusercontent.com/jafranonline/baperrasta-mod/main/baperrasta-mod.user.js
@@ -242,16 +242,17 @@
 
   // --- Leaderboard score submission: normalize stats & token age so /api/score accepts modded runs ---
   const TOKEN_POOL_KEY = 'baperRasta.runTokens';
-  const MAX_TOKEN_AGE = 3550; // ~59 minutes
+  const USED_TOKENS_KEY = 'baperRasta.usedTokens';
+  const MAX_TOKEN_AGE = 21600; // 6 hours (server tokens remain valid well past 90+ minutes)
   const SEED_TOKENS = [
-    'mvqcrdh2.87c4997556e54f2f.t-QyjZ6EaYgcklgGiomAiT5-U5yfxd_66GYt49GyTr0',
-    'mvqdjpfp.c0963d48e3ad48db.qIkkMG7YKq-iNsKWYJGTm8v5HueQJ5ZwWkd4LQufg3Y',
-    'mvqe1mmy.649de6b49ebb44c0.H622c4Izjo8G0yrT7usf65_6lyeR8gq9rLWg58qcnms',
-    'mvqeod15.b62d0b9c40ed473e.Oq_2uV0gjbjg9Z7ZZyK33YEZ_BnmakCAqXibUwQvMGM',
     'mvqeod21.d0b4ef0f8c0e4184.xLxMsBpdCKJhRt9kDYOqgX79FE_3ad03hHdmF2mrpdg',
     'mvqeod2n.7ef755a7b6d440ae.vB4lzYSYFZx9XEmyx8AjhvvycZB2IymfK8SsJfmWNx8',
-    'mvqeod3a.5831d60417f244d5.gok0J5mj1BwxPNJJzVjbK8hN5ykmfzfukeBlH9PHVDU',
-    'mvqeod42.0013beb167f04995.jMhTWeeVK7i3XgFxKesh_eKYyJM-7cjEh8VzUm4uVZQ',
+    'mvqg4gi5.b00f261dea0b4d24.Y9dTrRnWZiGq9_S-k0kq4E9kutkqYtn14CyOBCQiUUU',
+    'mvqg4hoq.45335c839fc34700.G7ESJbulWx2mCVMlNJfrLdjGgrNGHF4RkU086gjwNRI',
+    'mvqg4iv3.8096c4cca1cf4fa2.m88RaD07KAtyiaOQnDI_TFFgV0RA_o0CevammTP1TH8',
+    'mvqg4k1f.3c6e8d36994448df.QizTU4OUxLw6_6h-TWXDnyOcHqEaPVW6_kHj-cdz7wY',
+    'mvqg4l7s.a11f1bdf4f75441f.bpi4EheTYcMfy7aGaIb-BY2skFK_9VorxiN_xBAvyKk',
+    'mvqg4me3.a78095e315934973.pK0KQ0R-RS2dwpe0hWTuF6XgnFw7ssMJn-Ph_c_PFis',
   ];
 
   function tokenAgeSecs(t) {
@@ -260,23 +261,27 @@
     return Number.isFinite(ms) ? Math.floor((Date.now() - ms) / 1000) : -1;
   }
 
-  // Server curves: loss/crashes <= 45000, crashes <= 20 + 0.7*secs, loss <= 500000 + 13500*secs
+  // Server ranked curves: loss/crashes <= 40000, crashes <= 20 + 0.7*secs, loss <= 500000 + 12000*secs
   function statsForLoss(rawLoss) {
     const loss = Math.max(50, Math.round((rawLoss || 0) / 50) * 50);
-    const crashes = Math.max(2, Math.ceil(loss / 42000));
+    const crashes = Math.max(2, Math.ceil(loss / 36000));
     const neededSecs = Math.max(
       6,
-      Math.ceil(Math.max(0, loss - 480000) / 13200),
-      Math.ceil(Math.max(0, crashes - 19) / 0.68)
+      Math.ceil(Math.max(0, loss - 350000) / 11500),
+      Math.ceil(Math.max(0, crashes - 15) / 0.6)
     );
     return { loss, crashes, neededSecs };
   }
 
   function maxLossForSecs(secs) {
     const s = Math.max(6, secs);
-    const byTime = 480000 + 13200 * s;
-    const byCrashes = Math.floor(19 + 0.68 * s) * 42000;
+    const byTime = 350000 + 11500 * s;
+    const byCrashes = Math.floor(15 + 0.6 * s) * 36000;
     return Math.floor(Math.min(byTime, byCrashes) / 50) * 50;
+  }
+
+  function getUsedTokens() {
+    try { return new Set(JSON.parse(localStorage.getItem(USED_TOKENS_KEY) || '[]')); } catch { return new Set(); }
   }
 
   function getTokenPool() {
@@ -286,25 +291,26 @@
       const legacy = localStorage.getItem('baperRasta.runToken');
       if (legacy) list.push(legacy);
     } catch {}
+    const used = getUsedTokens();
     const seen = new Set();
     const valid = [...SEED_TOKENS, ...list].filter((t) => {
-      if (!t || seen.has(t)) return false;
+      if (!t || seen.has(t) || used.has(t)) return false;
       seen.add(t);
       const age = tokenAgeSecs(t);
       return age >= 0 && age < MAX_TOKEN_AGE;
     });
     // Sort oldest first (largest age first)
     valid.sort((a, b) => tokenAgeSecs(b) - tokenAgeSecs(a));
-    try { localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(valid.slice(0, 12))); } catch {}
+    try { localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(valid.slice(0, 16))); } catch {}
     return valid;
   }
 
   function addTokenToPool(t) {
-    if (!t) return;
+    if (!t || getUsedTokens().has(t)) return;
     const pool = getTokenPool();
     if (!pool.includes(t)) {
       pool.push(t);
-      try { localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(pool.slice(0, 12))); } catch {}
+      try { localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(pool.slice(0, 16))); } catch {}
     }
   }
 
@@ -312,6 +318,9 @@
     const idx = SEED_TOKENS.indexOf(t);
     if (idx !== -1) SEED_TOKENS.splice(idx, 1);
     try {
+      const used = getUsedTokens();
+      used.add(t);
+      localStorage.setItem(USED_TOKENS_KEY, JSON.stringify([...used].slice(-40)));
       const list = JSON.parse(localStorage.getItem(TOKEN_POOL_KEY) || '[]').filter((x) => x !== t);
       localStorage.setItem(TOKEN_POOL_KEY, JSON.stringify(list));
       if (localStorage.getItem('baperRasta.runToken') === t) localStorage.removeItem('baperRasta.runToken');
@@ -384,23 +393,34 @@
         const pool = getTokenPool();
         if (body.t && !pool.includes(body.t)) pool.push(body.t);
 
+        let prevBest = 0;
+        try {
+          const cur = JSON.parse(localStorage.getItem('baperRasta.wanted') || 'null');
+          if (cur?.rank && cur.best > 0) prevBest = cur.best;
+        } catch {}
+
         // Pick the YOUNGEST token that already satisfies neededSecs (so older tokens stay saved for bigger scores),
-        // followed by remaining tokens from oldest to youngest.
+        // followed by remaining tokens from oldest to youngest that can at least beat prevBest.
         const ready = pool.filter((t) => tokenAgeSecs(t) + 2 >= neededSecs).sort((a, b) => tokenAgeSecs(a) - tokenAgeSecs(b));
-        const notReady = pool.filter((t) => tokenAgeSecs(t) + 2 < neededSecs).sort((a, b) => tokenAgeSecs(b) - tokenAgeSecs(a));
+        const notReady = pool
+          .filter((t) => tokenAgeSecs(t) + 2 < neededSecs && maxLossForSecs(tokenAgeSecs(t) + 2) > prevBest)
+          .sort((a, b) => tokenAgeSecs(b) - tokenAgeSecs(a));
         const candidates = [...ready, ...notReady];
+        if (!candidates.length && pool.length) candidates.push(pool[0]);
 
         let lastRes = null;
         for (const cand of candidates) {
           lastRes = await sendScoreWithToken(input, init, body, cand, loss);
           const data = await lastRes.clone().json().catch(() => null);
           if (data && data.best > 0) {
-            dropTokenFromPool(cand); // token was used for a valid score
+            if (data.rank) dropTokenFromPool(cand); // server only consumes token on ranked submissions
             warmRunToken();
             log(`score accepted: ৳${data.best} (rank: ${data.rank ?? 'unranked'})`);
             return lastRes;
           }
-          dropTokenFromPool(cand);
+          if (data?.error === 'used' || data?.error === 'expired' || lastRes.status === 409) {
+            dropTokenFromPool(cand);
+          }
         }
         return lastRes || origFetch.apply(this, arguments);
       } catch (e) {
@@ -602,16 +622,20 @@
         } catch {}
       }
 
+      const mine = week && WANTED.mine ? WANTED.mine(week) : { best: 0, rank: null };
+      const prevBest = mine?.rank ? (mine.best || 0) : 0;
+
       const pool = getTokenPool();
-      // Keep the single oldest token in reserve for endRun (K/Esc) if we have multiple tokens
-      const bgToken = (pool.length > 1 ? pool[1] : pool[0]) || WANTED.token;
-      const maxAge = bgToken ? Math.max(6, tokenAgeSecs(bgToken)) : 6;
+      // Only background-sync when we have at least 2 tokens capable of beating prevBest,
+      // keeping the single oldest token in reserve for when the player ends the run (K/Esc).
+      const viable = pool.filter((t) => maxLossForSecs(tokenAgeSecs(t) + 2) > Math.max(cut, prevBest));
+      if (viable.length < 2) return;
+      const bgToken = viable[1];
+      const maxAge = Math.max(6, tokenAgeSecs(bgToken));
       const maxInstantLoss = maxLossForSecs(maxAge + 2);
       const sendLoss = Math.min(rawLoss, maxInstantLoss);
 
-      const mine = week && WANTED.mine ? WANTED.mine(week) : { best: 0, rank: null };
-      const prevBest = mine?.rank ? (mine.best || 0) : 0;
-      if (sendLoss <= cut || sendLoss <= prevBest || (lastSyncedLoss > 0 && sendLoss - lastSyncedLoss < 1000000)) return;
+      if (sendLoss <= cut || sendLoss <= prevBest || (lastSyncedLoss > 0 && sendLoss - lastSyncedLoss < 2000000)) return;
 
       syncing = true;
       lastSyncAt = now;
@@ -698,17 +722,19 @@
       }
     }
 
-    // Ensure Mo.end still runs its full newspaper UI & name-input flow even if watchScore already synced this exact score
+    // Ensure Mo.end still runs its full newspaper UI & name-input flow even if watchScore already synced this run's score
     if (G.showPaper) {
       const origShowPaper = G.showPaper;
       G.showPaper = function () {
         try {
           const cur = JSON.parse(localStorage.getItem('baperRasta.wanted') || 'null');
           const runLoss = Math.round(this.loss || 0);
-          if (cur && (!cur.rank || cur.best >= runLoss)) {
+          if (cur && !cur.rank && cur.best > 0) {
+            localStorage.setItem('baperRasta.wanted', JSON.stringify({ ...cur, best: 0 }));
+          } else if (cur && cur.rank && runLoss >= cur.best) {
             localStorage.setItem('baperRasta.wanted', JSON.stringify({
               ...cur,
-              best: cur.rank ? Math.max(0, runLoss - 50) : 0,
+              best: Math.max(0, runLoss - 50),
             }));
           }
         } catch {}
