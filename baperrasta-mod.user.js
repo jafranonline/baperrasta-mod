@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Baper Rasta — Bongobondhu Mode (God Mode)
 // @namespace    baperrasta-mod
-// @version      1.8.0
+// @version      1.8.1
 // @author       Jafran Hasan (@jafranonline)
 // @homepageURL  https://www.facebook.com/jafranonline/
 // @updateURL    https://raw.githubusercontent.com/jafranonline/baperrasta-mod/main/baperrasta-mod.user.js
@@ -762,6 +762,8 @@
   const FLY_MAX_ALT = 3.8; // limited height: clears cars, buses, barriers & holes while staying on the road
   let flyOn = false;
   let flyAlt = 0;
+  let flySoundUntil = 0;
+  let flySoundPlayed = false;
 
   function setFly(on) {
     const at = window.__at;
@@ -772,15 +774,43 @@
     window.__BR_flying = flyOn;
     if (flyOn) {
       at.P.jump = null;
-      at.sfx?.rocket?.(1.0);
-      at.sfx?.technologia?.();
-      at.PLAYER?.smoke?.(8, 0.9, 2.2, 0.35);
+      // Only play takeoff sound once per flight (and never overlap if clip is still playing)
+      if (!flySoundPlayed && performance.now() >= flySoundUntil) {
+        flySoundPlayed = true;
+        const durMs = (at.sfx?.clips?.technologia?.duration || 4.2) * 1000;
+        flySoundUntil = performance.now() + durMs;
+        at.sfx?.rocket?.(1.0);
+        at.sfx?.technologia?.();
+        at.PLAYER?.smoke?.(8, 0.9, 2.2, 0.35);
+      }
     }
   }
 
   function setupFly(at) {
     const { P, G, PLAYER } = at;
     if (!PLAYER) return;
+
+    // Prevent road jump-pads from triggering jump() and replaying rocket/technologia while flying
+    if (PLAYER.jump) {
+      const origJump = PLAYER.jump;
+      PLAYER.jump = function () {
+        if (flyOn || flyAlt > 0.05) return false;
+        return origJump.apply(this, arguments);
+      };
+    }
+
+    // Prevent technologia clip from ever overlapping itself
+    if (at.sfx?.technologia) {
+      const origTech = at.sfx.technologia;
+      let techPlayingUntil = 0;
+      at.sfx.technologia = function () {
+        const now = performance.now();
+        if (now < techPlayingUntil) return;
+        const durMs = (this.clips?.technologia?.duration || 4.2) * 1000;
+        techPlayingUntil = now + durMs;
+        return origTech.apply(this, arguments);
+      };
+    }
 
     if (PLAYER.collideProps) {
       const origProps = PLAYER.collideProps;
@@ -803,6 +833,7 @@
       PLAYER.reset = function () {
         flyOn = false;
         flyAlt = 0;
+        flySoundPlayed = false;
         window.__BR_flying = false;
         return origReset.apply(this, arguments);
       };
@@ -836,6 +867,7 @@
           P.pitch += (0.14 - P.pitch) * Math.min(1, dt * 8);
           if (flyAlt <= 0.05) {
             flyAlt = 0;
+            flySoundPlayed = false;
             P.air = 0;
             P.pitch = 0;
             P.bumpY = 0.18;
